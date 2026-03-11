@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DisX</title>
+    <style>
+        :root { --bg: #0b0f19; --card: #161e2e; --accent: #10b981; --text: #f9fafb; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); padding: 20px; margin: 0; display: flex; flex-direction: column; align-items: center; }
+        #app { width: 100%; max-width: 700px; background: var(--card); border-radius: 16px; padding: 24px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); }
+        #chat { height: 450px; overflow-y: auto; padding: 10px; margin-bottom: 20px; scroll-behavior: smooth; border-bottom: 1px solid #2d3748; }
+        
+        /* Thought Block Styling */
+        .thought { background: #1f2937; border-left: 3px solid var(--accent); padding: 12px; margin: 10px 0; font-size: 0.85rem; color: #9ca3af; border-radius: 4px; display: none; }
+        .thought.visible { display: block; }
+        .toggle-thought { font-size: 0.75rem; color: var(--accent); cursor: pointer; text-decoration: underline; margin-bottom: 5px; display: block; }
+
+        .input-group { display: flex; gap: 10px; }
+        input { flex: 1; padding: 14px; border-radius: 8px; border: 1px solid #374151; background: #0b0f19; color: white; outline: none; }
+        button { padding: 0 24px; background: var(--accent); border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { opacity: 0.8; }
+        .status { font-size: 0.7rem; color: #4b5563; margin-top: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <h1 style="margin-top:0; font-size: 1.5rem;">TruthBot <span id="model-tag" style="font-size: 0.6rem; background: #374151; padding: 4px 8px; border-radius: 12px; vertical-align: middle;">DETECTING...</span></h1>
+    <div id="chat"></div>
+    <div class="input-group">
+        <input type="text" id="query" placeholder="Ask the truth...">
+        <button id="sendBtn">ASK</button>
+    </div>
+    <div id="status" class="status">Initializing WebGPU...</div>
+</div>
+
+<script type="module">
+    import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2";
+
+    const WORKER_URL = "https://neerd.ahiyan1713.workers.dev/"; // UPDATE THIS
+    const chat = document.getElementById('chat');
+    const status = document.getElementById('status');
+    const modelTag = document.getElementById('model-tag');
+
+    // 1. Hardware Detection: Pioneer Principle - "Everyone isn't same"
+    const ram = navigator.deviceMemory || 4; // Default to 4GB if undetected
+    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    
+    // Logic: If mobile + low RAM, use SmolLM (135M). If mobile + good RAM, use DeepSeek (0.5B).
+    let MODEL_ID = "onnx-community/DeepSeek-R1-Distill-Qwen-1.5B-ONNX"; // Desktop Default
+    if (isMobile) {
+        MODEL_ID = (ram < 4) 
+            ? "onnx-community/SmolLM2-135M-Instruct" 
+            : "onnx-community/DeepSeek-R1-Distill-Qwen-0.5B";
+    }
+
+    modelTag.innerText = MODEL_ID.split('/').pop();
+    let generator;
+
+    async function init() {
+        try {
+            generator = await pipeline("text-generation", MODEL_ID, { device: "webgpu", dtype: "q4" });
+            status.innerText = "✅ Ready. Knowledge is free.";
+        } catch (e) {
+            status.innerText = "⚠️ WebGPU Error. Check browser compatibility.";
+        }
+    }
+
+    window.handleSend = async () => {
+        const query = document.getElementById('query').value;
+        if (!query || !generator) return;
+        
+        chat.innerHTML += `<div><b>You:</b> ${query}</div>`;
+        document.getElementById('query').value = "";
+        status.innerText = "🔍 Fetching live sources from DuckDuckGo...";
+
+        // 2. Fetch Live Grounding Data
+        const searchResponse = await fetch(`${WORKER_URL}?q=${encodeURIComponent(query)}`);
+        const sources = await searchResponse.json();
+        const context = sources.map(s => `SOURCE: ${s.url}\nINFO: ${s.content}`).join("\n\n");
+
+        // 3. Inference with Reasoning
+        status.innerText = "🧠 Reasoning over truth...";
+        const prompt = `<|system|>You are TruthBot. Use context. Reasoning in <think> tags. Pioneer doesn't rest.\nCONTEXT:\n${context}\n<|user|>${query}<|assistant|>`;
+        
+        const output = await generator(prompt, { max_new_tokens: 800, temperature: 0.6 });
+        const rawText = output[0].generated_text.split("<|assistant|>")[1];
+
+        // 4. UI Rendering with Thought Accordion
+        if (rawText.includes("<think>")) {
+            const [_, thought, answer] = rawText.split(/<\/?think>/);
+            const id = Date.now();
+            chat.innerHTML += `
+                <span class="toggle-thought" onclick="document.getElementById('${id}').classList.toggle('visible')">Toggle Reasoning</span>
+                <div class="thought" id="${id}">${thought.trim()}</div>
+                <div style="margin-bottom:20px;"><b>Bot:</b> ${answer.trim()}</div>`;
+        } else {
+            chat.innerHTML += `<div style="margin-bottom:20px;"><b>Bot:</b> ${rawText}</div>`;
+        }
+        
+        status.innerText = "✅ Done.";
+        chat.scrollTop = chat.scrollHeight;
+    };
+
+    document.getElementById('sendBtn').onclick = window.handleSend;
+    init();
+</script>
+</body>
+</html>
