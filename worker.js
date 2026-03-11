@@ -1,8 +1,10 @@
 import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2";
 
-// Pioneer Settings: Optimize for CPU
-env.allowLocalModels = false;
-env.backends.onnx.wasm.proxy = true; // Use a proxy to prevent UI lag
+// 1. Pioneer Silence: Stop the node assignment logs
+env.backends.onnx.logLevel = 'error'; 
+
+// 2. YOUR HUBBING FACE TOKEN (Generate at huggingface.co/settings/tokens)
+const HF_TOKEN = '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'; 
 
 let generator;
 
@@ -11,29 +13,22 @@ self.onmessage = async (e) => {
 
     try {
         if (type === 'load') {
-            // SWITCHED TO WASM: Works on every browser/device
             generator = await pipeline("text-generation", modelId, {
                 device: "wasm", 
-                dtype: "q8", // 8-bit is faster and more stable on CPUs
-                token: false,
+                dtype: "q8",
+                token: HF_TOKEN, // Pass token to fix 401 errors
                 progress_callback: (p) => self.postMessage({ type: 'progress', data: p })
             });
-            self.postMessage({ type: 'ready', device: 'CPU (WASM)' });
+            self.postMessage({ type: 'ready', device: 'WASM (CPU)' });
         }
 
         if (type === 'query') {
-            const prompt = `<|system|>TruthBot. Pioneer doesn't rest. Use context:\n${context}\n<|user|>${query}<|assistant|>`;
-            
-            // CPUs handle shorter sequences better; kept tokens at 500 for speed
-            const output = await generator(prompt, { 
-                max_new_tokens: 500, 
-                temperature: 0.7,
-                do_sample: true 
-            });
-            
+            const prompt = `<|system|>TruthBot. Use context:\n${context}\n<|user|>${query}<|assistant|>`;
+            const output = await generator(prompt, { max_new_tokens: 500 });
             self.postMessage({ type: 'result', data: output[0].generated_text });
         }
     } catch (err) {
-        self.postMessage({ type: 'error', error: "CPU Processing Error: " + err.message });
+        // Ensure the message channel stays open even on error
+        self.postMessage({ type: 'error', error: err.message });
     }
 };
